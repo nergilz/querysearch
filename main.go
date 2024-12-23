@@ -42,9 +42,13 @@ func MultiSearch(ctx context.Context, query string, sfs []SearchFunc) (Result, e
 
 	wg.Wait()
 
+	if err := *errPoint.Load(); err != nil {
+		return Result{}, err
+	}
+
 	select {
 	case r := <-resCh:
-		return r, *errPoint.Load()
+		return r, nil
 	case <-ctx.Done():
 		return Result{}, errors.New("done")
 	}
