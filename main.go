@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"sync/atomic"
 )
@@ -13,16 +12,19 @@ import (
 
 type Result struct{}
 
-type SearchFunc func(ctx context.Context, query string) (Result, error)
+type SearchFunc func(ctx context.Context, query string) (*Result, error)
 
 func main() {
 	// TODO init search
+
 }
 
-func MultiSearch(ctx context.Context, query string, sfs []SearchFunc) (Result, error) {
+func MultiSearch(ctx context.Context, query string, sfs []SearchFunc) (*Result, error) {
 	wg := &sync.WaitGroup{}
 	errPoint := atomic.Pointer[error]{}
-	resCh := make(chan Result)
+	resCh := make(chan *Result)
+
+	ctx, cancel := context.WithCancel(ctx)
 
 	for _, f := range sfs {
 		wg.Add(1)
@@ -33,23 +35,23 @@ func MultiSearch(ctx context.Context, query string, sfs []SearchFunc) (Result, e
 			r, err := f(ctx, query)
 			if err != nil {
 				errPoint.Store(&err)
+			} else {
+				resCh <- r
+				cancel()
 			}
-
-			resCh <- r
-
 		}()
 	}
 
+	// ждать все горутины для получения последней ошибки, но при этом нужно получить первый результат
 	wg.Wait()
+	close(resCh)
 
 	if err := *errPoint.Load(); err != nil {
-		return Result{}, err
+		return nil, err
 	}
 
-	select {
-	case r := <-resCh:
-		return r, nil
-	case <-ctx.Done():
-		return Result{}, errors.New("done")
-	}
+	// канал буфиризированный - блокирует, и нам нужно только первое значение
+	r := <-resCh
+
+	return r, nil
 }
