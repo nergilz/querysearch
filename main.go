@@ -2,27 +2,41 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Реализовать функцию, которая выполняет поиск query во всех переданных SearchFunc
 // Когда получаем первый успешный результат - отдаем его сразу, не дожидаясь результата других SearchFunc
 // Если все SearchFunc отработали с ошибкой - отдаем последнюю полученную ошибку
 
-type Result struct{}
+type Result struct {
+	Data string
+}
 
 type SearchFunc func(ctx context.Context, query string) (*Result, error)
 
 func main() {
-	// TODO init search
+	sfs := []SearchFunc{foo1, foo2, foo3}
+
+	ctx := context.Background()
+	query := "tmp"
+
+	r, err := MultiSearch(ctx, query, sfs)
+	if err != nil {
+		fmt.Println("ERROR:", err.Error())
+	} else {
+		fmt.Println("RESULT:", r)
+	}
 
 }
 
 func MultiSearch(ctx context.Context, query string, sfs []SearchFunc) (*Result, error) {
 	wg := &sync.WaitGroup{}
 	errPoint := atomic.Pointer[error]{}
-	resCh := make(chan *Result)
+	resCh := make(chan *Result, len(sfs))
 
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -35,10 +49,11 @@ func MultiSearch(ctx context.Context, query string, sfs []SearchFunc) (*Result, 
 			r, err := f(ctx, query)
 			if err != nil {
 				errPoint.Store(&err)
-			} else {
-				resCh <- r
-				cancel()
 			}
+
+			resCh <- r
+			cancel()
+
 		}()
 	}
 
@@ -46,12 +61,42 @@ func MultiSearch(ctx context.Context, query string, sfs []SearchFunc) (*Result, 
 	wg.Wait()
 	close(resCh)
 
-	if err := *errPoint.Load(); err != nil {
-		return nil, err
+	// если error нет то читаем первый результат из канала
+	if err := errPoint.Load(); err != nil {
+		return nil, *err
 	}
 
-	// канал буфиризированный - блокирует, и нам нужно только первое значение
 	r := <-resCh
 
 	return r, nil
+}
+
+func foo1(ctx context.Context, query string) (*Result, error) {
+	// n := rand.Intn(5)
+	time.Sleep(time.Duration(2) * time.Second)
+	return &Result{
+		Data: "first",
+	}, nil
+}
+
+func foo2(ctx context.Context, query string) (*Result, error) {
+	// n := rand.Intn(5)
+	time.Sleep(time.Duration(3) * time.Second)
+	return &Result{
+		Data: "second",
+	}, nil
+}
+
+// func foo3(ctx context.Context, query string) (*Result, error) {
+// 	// n := rand.Intn(10)
+// 	time.Sleep(time.Duration(1) * time.Second)
+// 	return nil, errors.New("foo3 error")
+// }
+
+func foo3(ctx context.Context, query string) (*Result, error) {
+	// n := rand.Intn(5)
+	time.Sleep(time.Duration(1) * time.Second)
+	return &Result{
+		Data: "third",
+	}, nil
 }
